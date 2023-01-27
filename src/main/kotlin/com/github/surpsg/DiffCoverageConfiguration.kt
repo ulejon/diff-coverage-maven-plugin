@@ -6,7 +6,7 @@ import java.net.URL
 class DiffSourceConfiguration(
     var url: URL? = null,
     var git: String? = null,
-    var file: File? = null
+    var file: String? = null
 ) {
     override fun toString(): String {
         return "DiffSourceConfiguration(url=$url, git=$git, file=$file)"

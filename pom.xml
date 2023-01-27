@@ -237,7 +237,7 @@
                         <pomExclude>url-source-check/pom.xml</pomExclude>
                     </pomExcludes>
                     <pomIncludes>
-                        <pomInclude>*/pom.xml</pomInclude>
+                        <pomInclude>multi-module/pom.xml</pomInclude>
                     </pomIncludes>
                     <goals>
                         <goal>clean</goal>
@@ -307,6 +307,14 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>7</source>
+                    <target>7</target>
+                </configuration>
             </plugin>
         </plugins>
     </build>

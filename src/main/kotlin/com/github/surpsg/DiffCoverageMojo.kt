@@ -6,6 +6,8 @@ import com.form.coverage.config.ReportConfig
 import com.form.coverage.config.ReportsConfig
 import com.form.coverage.config.ViolationRuleConfig
 import com.form.coverage.report.ReportGenerator
+import org.apache.maven.execution.MavenSession
+import org.apache.maven.monitor.event.EventMonitor
 import org.apache.maven.plugin.AbstractMojo
 import org.apache.maven.plugins.annotations.LifecyclePhase
 import org.apache.maven.plugins.annotations.Mojo
@@ -13,6 +15,11 @@ import org.apache.maven.plugins.annotations.Parameter
 import org.apache.maven.project.MavenProject
 import org.codehaus.plexus.util.FileUtils
 import java.io.File
+import java.nio.file.Path
+import java.nio.file.Paths
+import kotlin.io.path.absolutePathString
+import kotlin.io.path.relativeTo
+
 
 @Mojo(name = "diffCoverage", defaultPhase = LifecyclePhase.VERIFY)
 class DiffCoverageMojo : AbstractMojo() {
@@ -35,26 +42,48 @@ class DiffCoverageMojo : AbstractMojo() {
     @Parameter(required = false)
     private var excludes: List<String> = emptyList()
 
-    @Parameter(defaultValue = "\${project.reporting.outputDirectory}")
-    private lateinit var outputDirectory: File
-
     @Parameter(name = "diffSource", required = true)
     private lateinit var diffSource: DiffSourceConfiguration
 
     @Parameter(name = "violations")
     private var violations = ViolationsConfiguration()
 
-    private val rootProjectDir: File
-        get() = reactorProjects[0].basedir
+    @Parameter(property = "session", required = true, readonly = true)
+    private lateinit var session: MavenSession
+
+    @Parameter(property = "project", required = true, readonly = true)
+    private lateinit var project: MavenProject
+
+//    private val rootProjectDir: File
+//        get() = reactorProjects[0].basedir
 
     override fun execute() {
-        val diffCoverageConfig: DiffCoverageConfig = buildDiffCoverageConfig().apply {
+
+        val thisTheLastProject: Boolean = isThisTheLastProject()
+
+
+//        val size = reactorProjects.size
+//        if (reactorProjects[size - 1] !== project) {
+//            println("it's not last")
+//        } else {
+//            println("it's last")
+//        }
+
+        if (!thisTheLastProject) {
+            return
+        }
+        val rootProjectDir = session.topLevelProject.basedir
+        val outputDirectory = rootProjectDir.resolve("target/diffCoverage")
+        outputDirectory.mkdirs()
+
+        val diffCoverageConfig: DiffCoverageConfig = buildDiffCoverageConfig(rootProjectDir, outputDirectory).apply {
             logPluginProperties(this)
         }
 
-        ReportGenerator(rootProjectDir, diffCoverageConfig).apply {
+        ReportGenerator(outputDirectory, diffCoverageConfig).apply {
             val reportDir = File(diffCoverageConfig.reportsConfig.baseReportDir)
             reportDir.mkdirs()
+            log.error("diffSaveTo: $reportDir")
             saveDiffToDir(reportDir).apply {
                 log.info("diff content saved to '$absolutePath'")
             }
@@ -63,20 +92,33 @@ class DiffCoverageMojo : AbstractMojo() {
         }
     }
 
+    fun isThisTheLastProject(): Boolean {
+        return session.getProjectDependencyGraph().getSortedProjects()
+            .get(session.getProjectDependencyGraph().getSortedProjects().size - 1).getArtifactId()
+            .equals(project.getArtifactId(), true)
+    }
+
+
+
     private fun logPluginProperties(diffCoverageConfig: DiffCoverageConfig) {
         log.apply {
-            debug("Root dir: $rootProjectDir")
+//            debug("Root dir: $rootProjectDir")
             debug("Classes dirs: ${diffCoverageConfig.classFiles}")
             debug("Sources: ${diffCoverageConfig.sourceFiles}")
             debug("Exec files: ${diffCoverageConfig.execFiles}")
         }
     }
 
-    private fun buildDiffCoverageConfig(): DiffCoverageConfig {
+    private fun buildDiffCoverageConfig(rootProjectDir: File, outputDirectory: File): DiffCoverageConfig {
+        val resultPath: String = if (diffSource.file != null) {
+            rootProjectDir.resolve("${diffSource.file}").absolutePath
+        } else {
+            ""
+        }
         return DiffCoverageConfig(
-            reportName = rootProjectDir.name,
+            reportName = "aza",
             diffSourceConfig = DiffSourceConfig(
-                file = diffSource.file.asStringOrEmpty { absolutePath },
+                file = resultPath,
                 url = diffSource.url.asStringOrEmpty { toString() },
                 diffBase = diffSource.git ?: ""
             ),
@@ -87,7 +129,7 @@ class DiffCoverageMojo : AbstractMojo() {
                 xml = ReportConfig(enabled = true, "diff-coverage.xml")
             ),
             violationRuleConfig = buildViolationRuleConfig(),
-            execFiles = collectExecFiles(),
+            execFiles = collectExecFiles(rootProjectDir),
             classFiles = collectClassesFiles().throwIfEmpty("Classes collection passed to Diff-Coverage"),
             sourceFiles = reactorProjects.map { it.compileSourceRoots }.flatten().map { File(it) }.toSet()
         )
@@ -138,7 +180,7 @@ class DiffCoverageMojo : AbstractMojo() {
         }.toSet()
     }
 
-    private fun collectExecFiles(): Set<File> {
+    private fun collectExecFiles(rootProjectDir: File): Set<File> {
         return if (dataFileIncludes == null) {
             setOf(dataFile)
         } else {
